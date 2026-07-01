@@ -551,6 +551,10 @@ textarea{resize:vertical;min-height:70px;line-height:1.5}
             style="padding:4px 9px;background:#FEE500;color:#3C1E1E;border:none;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;font-family:'Noto Sans KR',sans-serif;display:none">
             🗺 카카오맵
           </button>
+          <button id="xiMapCaptureBtn" onclick="captureXiMapImage()" title="지도 이미지 캡처 후 사진에 추가"
+            style="padding:4px 9px;background:#7B00A0;color:white;border:none;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;font-family:'Noto Sans KR',sans-serif;display:none">
+            📸 캡처
+          </button>
         </div>
         <div id="xiMapContainer" style="width:100%;height:260px;background:#F0EFE9;display:flex;align-items:center;justify-content:center">
           <div style="text-align:center;color:var(--gray-3);font-size:13px">
@@ -1840,6 +1844,7 @@ function _initXiMap(fLat, fLng, addr) {
   if (!_xiMap) {
     container.innerHTML = '';
     _xiMap = new kakao.maps.Map(container, { center, level: 4 });
+    _xiMap.addControl(new kakao.maps.ZoomControl(), kakao.maps.ControlPosition.RIGHT);
     kakao.maps.event.addListener(_xiMap, 'click', onXiMapClick);
     _xiMarkerHydrant = new kakao.maps.Marker({ position: center, map: _xiMap, title: '소화전 위치' });
     _xiInfoHydrant = new kakao.maps.CustomOverlay({
@@ -1860,6 +1865,8 @@ function _initXiMap(fLat, fLng, addr) {
   // 카카오맵 열기 버튼 표시
   const openBtn = document.getElementById('xiMapOpenBtn');
   if (openBtn) openBtn.style.display = 'block';
+  const captureBtn = document.getElementById('xiMapCaptureBtn');
+  if (captureBtn) captureBtn.style.display = 'block';
 
   // relayout 다단계 — 모바일 느린 렌더링 대응
   const doRelayout = () => { if (_xiMap) { _xiMap.relayout(); _xiMap.setCenter(center); } };
@@ -2070,6 +2077,8 @@ function resetXiMap() {
   _xiMapPendingArgs = null;
   const openBtn = document.getElementById('xiMapOpenBtn');
   if (openBtn) openBtn.style.display = 'none';
+  const captureBtn = document.getElementById('xiMapCaptureBtn');
+  if (captureBtn) captureBtn.style.display = 'none';
   const container = document.getElementById('xiMapContainer');
   if (container) {
     container.innerHTML = '';
@@ -2225,6 +2234,58 @@ function updateKakaoInfo() {
   saveBtn.style.background = '#C8230A';
   saveBtn.style.color = 'white';
   saveBtn.style.cursor = 'pointer';
+}
+
+// 미니맵 현재 위치를 정적 지도 이미지로 캡처해 소화전 번호 워터마크와 함께 사진 목록에 추가
+// (카카오맵 SDK 지도는 여러 타일이 합쳐진 형태라 화면을 직접 캡처하면 CORS 문제로 실패하므로,
+//  OpenStreetMap 정적 지도 이미지를 새로 생성하는 방식을 씀 — saveKakaoLocation()과 동일한 방식)
+function captureXiMapImage() {
+  const latStr = document.getElementById('xi-lat')?.textContent;
+  const lngStr = document.getElementById('xi-lng')?.textContent;
+  const lat = parseFloat(latStr), lng = parseFloat(lngStr);
+  if (!lat || !lng || isNaN(lat) || isNaN(lng)) { showToast('위치 정보가 없습니다', 'error'); return; }
+
+  showToast('📸 지도 이미지 캡처 중...', '');
+  const latF = lat.toFixed(6);
+  const lngF = lng.toFixed(6);
+  const tileUrl = `https://staticmap.openstreetmap.de/staticmap.php?center=${latF},${lngF}&zoom=17&size=640x360&markers=${latF},${lngF},red-pushpin`;
+
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || 640;
+      canvas.height = img.naturalHeight || 360;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      // 소화전 번호 워터마크
+      const id = getHydrantId();
+      if (id) {
+        const label = `No.${id}`;
+        ctx.font = 'bold 20px monospace';
+        const tw = ctx.measureText(label).width;
+        const pad = 8;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(canvas.width - tw - pad*3, canvas.height - 36, tw + pad*2, 28);
+        ctx.fillStyle = '#FFD700';
+        ctx.fillText(label, canvas.width - tw - pad*2, canvas.height - 13);
+      }
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      state.photos['photos'].push(dataUrl);
+      renderAllThumbs('photos');
+      showToast('✅ 지도 이미지가 사진 목록에 추가되었습니다', 'success');
+    } catch(e) {
+      Logger.warn('지도 캡처 canvas 실패:', e);
+      state.photos['photos'].push(tileUrl);
+      renderAllThumbs('photos');
+      showToast('✅ 지도 이미지가 사진 목록에 추가되었습니다', 'success');
+    }
+  };
+  img.onerror = () => {
+    showToast('지도 이미지를 불러오지 못했습니다', 'error');
+  };
+  img.src = tileUrl;
 }
 
 function saveKakaoLocation() {
