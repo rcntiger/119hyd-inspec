@@ -542,7 +542,7 @@ textarea{resize:vertical;min-height:70px;line-height:1.5}
       <!-- 소화전 위치 미니 지도 (항상 표시) -->
       <div id="xiMapWrap" style="border-radius:10px;overflow:hidden;border:1.5px solid #A8C8F5;margin-top:8px">
         <div style="background:#1A2742;padding:7px 10px;display:flex;align-items:center;gap:6px">
-          <span style="color:white;font-size:12px;font-weight:700;flex:1">📍 소화전 위치</span>
+          <span style="color:white;font-size:12px;font-weight:700;flex:1"></span>
           <button id="xiMapGpsBtn" onclick="reFetchGpsForXiMap()" title="현위치 갱신"
             style="padding:4px 9px;background:rgba(255,255,255,0.15);color:white;border:none;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;font-family:'Noto Sans KR',sans-serif">
             🎯 현위치
@@ -1792,6 +1792,13 @@ function xiLabelHTML(text, color) {
   return `<div style="padding:5px 10px;font-size:12px;font-weight:700;color:${color};background:white;border:1.5px solid ${color};border-radius:14px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.18)">${text}</div>`;
 }
 
+// 지도 위 소화전 마커 라벨 텍스트 — 선택된 소화전 번호로 표시 (예: 000052 → "🔴 52호")
+function getHydrantMapLabelText() {
+  const id = getHydrantId();
+  const num = parseInt(id, 10);
+  return id && !isNaN(num) ? `🔴 ${num}호` : '🔴 소화전';
+}
+
 // 소화전 선택 시 미니맵 업데이트 (applyExcelInfo에서 호출)
 // ── 미니맵 초기화 대기 큐 ────────────────────────────
 let _xiMapPendingArgs = null;  // SDK 로드 전 요청 저장
@@ -1846,15 +1853,26 @@ function _initXiMap(fLat, fLng, addr) {
     _xiMap = new kakao.maps.Map(container, { center, level: 4 });
     _xiMap.addControl(new kakao.maps.ZoomControl(), kakao.maps.ControlPosition.RIGHT);
     kakao.maps.event.addListener(_xiMap, 'click', onXiMapClick);
+    // 네트워크가 느려 타일 로딩이 지연될 때, 실제로 타일이 다 준비된 시점(tilesloaded)에
+    // 맞춰 크기를 다시 잡아줌 — 고정 타이머만으로는 못 따라가는 경우를 보완
+    kakao.maps.event.addListener(_xiMap, 'tilesloaded', () => {
+      const c = document.getElementById('xiMapContainer');
+      if (c) c.style.cssText = 'width:100%;height:260px;min-height:260px;';
+      _xiMap.relayout();
+    });
     _xiMarkerHydrant = new kakao.maps.Marker({ position: center, map: _xiMap, title: '소화전 위치' });
     _xiInfoHydrant = new kakao.maps.CustomOverlay({
       position: center, map: _xiMap, xAnchor: 0.5, yAnchor: 1.8, zIndex: 4,
-      content: xiLabelHTML('🔴 소화전', '#C8230A')
+      content: xiLabelHTML(getHydrantMapLabelText(), '#C8230A')
     });
   } else {
     _xiMap.setCenter(center);
     if (_xiMarkerHydrant) { _xiMarkerHydrant.setPosition(center); _xiMarkerHydrant.setMap(_xiMap); }
-    if (_xiInfoHydrant) { _xiInfoHydrant.setPosition(center); _xiInfoHydrant.setMap(_xiMap); }
+    if (_xiInfoHydrant) {
+      _xiInfoHydrant.setPosition(center);
+      _xiInfoHydrant.setContent(xiLabelHTML(getHydrantMapLabelText(), '#C8230A'));
+      _xiInfoHydrant.setMap(_xiMap);
+    }
     if (_xiMarkerGps) { _xiMarkerGps.setMap(null); _xiMarkerGps = null; }
     if (_xiInfoGps)   { _xiInfoGps.setMap(null);    _xiInfoGps = null; }
     _xiGpsData = null;
@@ -1868,9 +1886,17 @@ function _initXiMap(fLat, fLng, addr) {
   const captureBtn = document.getElementById('xiMapCaptureBtn');
   if (captureBtn) captureBtn.style.display = 'block';
 
-  // relayout 다단계 — 모바일 느린 렌더링 대응
-  const doRelayout = () => { if (_xiMap) { _xiMap.relayout(); _xiMap.setCenter(center); } };
-  [100, 300, 600, 1000, 1800].forEach(ms => setTimeout(doRelayout, ms));
+  // relayout 다단계 — 모바일/불안정한 네트워크의 느린 렌더링 대응.
+  // 매번 컨테이너 크기를 다시 강제 지정한 뒤 relayout해서, 네트워크 지연으로
+  // 카카오 SDK가 컨테이너 크기를 잘못 계산해 지도가 화면 전체 크기로 깨지는 것을 방지.
+  const doRelayout = () => {
+    if (!_xiMap) return;
+    const c = document.getElementById('xiMapContainer');
+    if (c) c.style.cssText = 'width:100%;height:260px;min-height:260px;';
+    _xiMap.relayout();
+    _xiMap.setCenter(center);
+  };
+  [100, 300, 600, 1000, 1800, 3000, 5000].forEach(ms => setTimeout(doRelayout, ms));
 
   // IntersectionObserver — 컨테이너가 화면에 보일 때 추가 relayout
   if ('IntersectionObserver' in window) {
