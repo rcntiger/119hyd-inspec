@@ -3771,8 +3771,7 @@ function showImportedList(list, sortMode) {
       <div class="card-header">
         <div class="card-num" style="background:#7B00A0">📋</div>
         <div class="card-title">목록</div>
-        <span style="font-size:11px;color:var(--green);font-weight:700;margin-left:4px;background:#EAF5EE;padding:2px 7px;border-radius:20px">✓${doneCount}완료</span>
-        <span style="font-size:11px;color:var(--red);font-weight:700;margin-left:3px;background:#FFF0EE;padding:2px 7px;border-radius:20px">●${todoCount}미완료</span>
+        <span style="font-size:11px;color:var(--gray-4);font-weight:700;margin-left:4px">총 ${sorted.length}개 중 <span style="color:var(--green)">${doneCount}개 완료</span>, <span style="color:var(--red)">${todoCount}개 미완료</span></span>
         <button onclick="document.getElementById('importedListWrap').style.display='none'" style="margin-left:auto;background:none;border:none;color:var(--gray-4);font-size:18px;cursor:pointer;line-height:1">×</button>
       </div>
       <div style="display:flex;gap:6px;padding:8px 14px;border-bottom:var(--border);background:var(--gray-1)">
