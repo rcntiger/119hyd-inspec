@@ -570,7 +570,7 @@ textarea{resize:vertical;min-height:70px;line-height:1.5}
           <div id="xiMapFixAddr" style="font-size:12px;color:var(--dark);margin-bottom:8px;line-height:1.5"></div>
           <div style="display:flex;gap:6px">
             <button onclick="applyGpsAddressToXi()" style="flex:1;padding:9px;background:var(--red);color:white;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Noto Sans KR',sans-serif">✅ 이 주소로 저장</button>
-            <button onclick="document.getElementById('xiMapFixWrap').style.display='none'" style="padding:9px 14px;background:var(--gray-1);color:var(--gray-4);border:var(--border);border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Noto Sans KR',sans-serif">취소</button>
+            <button onclick="document.getElementById('xiMapFixWrap').style.display='none'; if(_xiPickedMarker){_xiPickedMarker.setMap(null);_xiPickedMarker=null;}" style="padding:9px 14px;background:var(--gray-1);color:var(--gray-4);border:var(--border);border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Noto Sans KR',sans-serif">취소</button>
           </div>
         </div>
       </div>
@@ -1982,6 +1982,7 @@ let _xiLongPressTimer = null;
 let _xiIsLongPress = false;
 let _xiTouchStartXY = null;
 let _xiPickedPoint = null; // { lat, lng, roadAddr, jibunAddr } — 롱프레스로 찍은 지점
+let _xiPickedMarker = null; // 롱프레스로 찍은 지점을 지도에 보여주는 핀 마커
 
 function setupXiMapLongPress(container) {
   // capture:true — 카카오맵이 자체적으로 터치 이벤트의 버블링을 막는 경우(지도 드래그 처리 등)에도
@@ -2116,6 +2117,16 @@ function getGpsMarkerImage(scale) {
   const src = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
   return new kakao.maps.MarkerImage(
     src, new kakao.maps.Size(w, h), { offset: new kakao.maps.Point(w/2, h - Math.round(4*scale)) }
+  );
+}
+
+// 롱프레스로 찍은 지점을 지도에 바로 보여줄 핀(📌) 마커 이미지
+function getPickedMarkerImage() {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="34" height="36">` +
+    `<text x="17" y="29" font-size="30" text-anchor="middle">📌</text></svg>`;
+  const src = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
+  return new kakao.maps.MarkerImage(
+    src, new kakao.maps.Size(34, 36), { offset: new kakao.maps.Point(17, 33) }
   );
 }
 
@@ -2338,8 +2349,12 @@ function onXiMapClick() {}
 // 지도를 "길게" 눌렀을 때 호출 — 누른 지점의 좌표를 그대로 써서 "원하는 위치"를 직접 지정
 // (기존엔 현위치 GPS 기준으로만 고정이었음). latlng: kakao.maps.LatLng
 async function onXiMapLongPress(latlng) {
-  if (!latlng) return;
+  if (!latlng || !_xiMap) return;
   const lat = latlng.getLat(), lng = latlng.getLng();
+
+  // 역지오코딩(주소 변환) 끝날 때까지 기다리지 않고, 찍은 지점에 핀부터 바로 표시
+  if (_xiPickedMarker) _xiPickedMarker.setMap(null);
+  _xiPickedMarker = new kakao.maps.Marker({ position: latlng, map: _xiMap, image: getPickedMarkerImage(), zIndex: 10 });
 
   showToast('📍 선택한 위치 확인 중...', '');
   const { roadAddr, jibunAddr } = await reverseGeocodePoint(lat, lng);
@@ -2351,7 +2366,7 @@ async function onXiMapLongPress(latlng) {
 
   fixAddr.innerHTML = `
     <div style="margin-bottom:4px"><span style="color:var(--gray-4)">현재 주소:</span> <span style="color:var(--dark);font-weight:500">${currentAddr || '(없음)'}</span></div>
-    <div><span style="color:var(--gray-4)">선택한 위치:</span> <span style="color:var(--red);font-weight:700">${roadAddr}</span></div>
+    <div><span style="color:var(--gray-4)">📌 선택한 위치:</span> <span style="color:var(--red);font-weight:700">${roadAddr}</span></div>
     <div style="font-size:11px;color:var(--gray-4);margin-top:4px">📍 ${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}</div>`;
 
   fixWrap.style.display = 'block';
@@ -2400,6 +2415,8 @@ function applyGpsAddressToXi() {
     if (_xiInfoHydrant) { _xiInfoHydrant.setPosition(pos); _xiInfoHydrant.setMap(_xiMap); }
   }
 
+  // 소화전 마커가 이미 그 위치로 이동했으니 임시 핀은 정리
+  if (_xiPickedMarker) { _xiPickedMarker.setMap(null); _xiPickedMarker = null; }
   _xiPickedPoint = null;
   showToast('✅ 선택한 위치로 주소가 저장되었습니다', 'success');
 }
@@ -2432,6 +2449,7 @@ function resetXiMap() {
   if (_xiInfoGps)       { try { _xiInfoGps.setMap(null);          } catch {} _xiInfoGps = null; }
   if (_xiMarkerHydrant) { try { _xiMarkerHydrant.setMap(null);  } catch {} _xiMarkerHydrant = null; }
   if (_xiMarkerGps)     { try { _xiMarkerGps.setMap(null);      } catch {} _xiMarkerGps = null; }
+  if (_xiPickedMarker)  { try { _xiPickedMarker.setMap(null);   } catch {} _xiPickedMarker = null; }
   _xiMap = null;
   _xiGpsData = null;
   _xiPickedPoint = null;
