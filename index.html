@@ -179,7 +179,7 @@ textarea{resize:vertical;min-height:70px;line-height:1.5}
 .modal-close-btn{width:100%;padding:13px;margin-top:14px;background:var(--gray-1);border:var(--border);border-radius:8px;font-family:'Noto Sans KR',sans-serif;font-size:14px;font-weight:700;color:var(--dark);cursor:pointer}
 
 /* Toast */
-.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--dark);color:white;padding:11px 18px;border-radius:30px;font-size:13px;font-weight:500;z-index:999;transition:transform .3s ease;white-space:nowrap}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--dark);color:white;padding:11px 18px;border-radius:20px;font-size:13px;font-weight:500;z-index:999;transition:transform .3s ease;cursor:pointer;max-width:88vw;white-space:pre-wrap;word-break:break-word;text-align:center}
 .toast.show{transform:translateX(-50%) translateY(0)}
 .toast.success{background:var(--green)}
 .toast.error{background:var(--red)}
@@ -853,7 +853,7 @@ textarea{resize:vertical;min-height:70px;line-height:1.5}
 <script>
 // ── Supabase ───────────────────────────────────────────
 const SUPABASE_URL = 'https://uxbbzvvkpebdvdjobnyz.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_CQ0oMcxLBZn1v0vFrt4lGg_9IMcgFkr';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV4YmJ6dnZrcGViZHZkam9ibnl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwMTIzNTQsImV4cCI6MjA4OTU4ODM1NH0.PvCMpxSv-B3woWKfjxEkoyv1gDdjEHZy3_lvWVrSz2E';
 SupabaseUtil.init(SUPABASE_URL, SUPABASE_KEY);
 
 // ── Cloudinary 사진 업로드 ─────────────────────────────
@@ -918,21 +918,21 @@ async function saveToSupabase(record) {
     insp_name: record.inspName,
     data: { ...record, photos }
   };
-  await SupabaseUtil.upsert('inspections', row, 'id');
+  await withSchemaCacheRetry(() => SupabaseUtil.upsert('inspections', row, 'id'));
   return { ...record, photos };
 }
 
 // Supabase에서 전체 불러오기
 async function loadFromSupabase() {
-  const data = await SupabaseUtil.select('inspections', {
+  const data = await withSchemaCacheRetry(() => SupabaseUtil.select('inspections', {
     order: { column: 'created_at', ascending: false }
-  });
+  }));
   return data.map(row => row.data);
 }
 
 // Supabase에서 삭제
 async function deleteFromSupabase(id) {
-  await SupabaseUtil.remove('inspections', { id });
+  await withSchemaCacheRetry(() => SupabaseUtil.remove('inspections', { id }));
 }
 
 // ── 인증 ───────────────────────────────────────────────
@@ -957,17 +957,20 @@ function withTimeout(promise, ms = 3000) {
   return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
 }
 
-// Supabase가 절전 상태에서 깨어나는 순간 등에 일시적으로 나는
-// "could not query the database for the schema cache" 오류는 보통 몇 초 안에 저절로 풀리므로,
-// 이 오류일 때만 짧게 대기 후 자동 재시도한다 (그 외 오류는 바로 그대로 던짐)
-async function withSchemaCacheRetry(fn, retries = 2, delayMs = 1500) {
+// Supabase 무료 플랜은 한동안 요청이 없으면 DB 컴퓨트가 절전 상태로 내려갔다가,
+// 요청이 들어오면 다시 깨어나는 구조. 깨어나는 동안 "schema cache" 오류/503이 계속 날 수 있는데
+// 짧으면 몇 초, 길면 20~30초까지도 걸릴 수 있어서 재시도를 더 끈질기게 하도록 함
+// (지수 백오프: 2초 → 4초 → 8초 → 8초 → 8초, 최대 5번 재시도 = 최대 약 30초 대기)
+async function withSchemaCacheRetry(fn, retries = 5, baseDelayMs = 2000) {
   for (let i = 0; i <= retries; i++) {
     try {
       return await fn();
     } catch (e) {
       const isSchemaCacheErr = /schema cache/i.test(e?.message || '');
       if (!isSchemaCacheErr || i === retries) throw e;
-      Logger.warn(`[withSchemaCacheRetry] 스키마 캐시 오류 — ${delayMs}ms 후 재시도 (${i + 1}/${retries})`);
+      const delayMs = Math.min(baseDelayMs * Math.pow(2, i), 8000);
+      Logger.warn(`[withSchemaCacheRetry] 스키마 캐시 오류(DB 깨어나는 중일 수 있음) — ${delayMs}ms 후 재시도 (${i + 1}/${retries})`);
+      if (i === 1) showToast('☁ 서버가 절전 상태에서 깨어나는 중입니다... 잠시만요', '');
       await new Promise(r => setTimeout(r, delayMs));
     }
   }
@@ -977,7 +980,7 @@ async function getConfig() {
   try {
     const rows = await withTimeout(
       withSchemaCacheRetry(() => SupabaseUtil.select('inspections', { columns: 'data', eq: { id: -1 }, limit: 1 })),
-      8000
+      35000 // 콜드스타트 재시도(최대 약 30초) 감안해 넉넉히
     );
     const cfg = rows?.[0]?.data;
     if (!cfg) return getCachedConfig() || {};
@@ -991,7 +994,7 @@ async function setConfig(patch) {
   await withTimeout(
     withSchemaCacheRetry(() => SupabaseUtil.upsert('inspections',
       { id: -1, hydrant_id: '__config__', insp_date: '', insp_name: '', data: merged }, 'id')),
-    8000 // 재시도 텀까지 감안해 타임아웃 넉넉히
+    35000 // 콜드스타트 재시도(최대 약 30초) 감안해 넉넉히
   );
   setCachedConfig(merged);
 }
@@ -1000,6 +1003,46 @@ async function getTeamPw() {
 }
 async function getAdminPw() {
   try { const c = await getConfig(); return c.adminPw || INITIAL_MASTER_KEY; } catch { return INITIAL_MASTER_KEY; }
+}
+
+// ── 비밀번호 해시 (평문을 Supabase/네트워크 응답에 남기지 않기 위함) ────
+// Web Crypto(SubtleCrypto)가 없는 환경(예: file:// 프로토콜 등 비보안 컨텍스트)에서는
+// 해시 없이 평문 그대로 반환 — 그 환경에서만 예전처럼 평문 비교로 동작(로그인 자체가 깨지는 것 방지)
+async function sha256Hex(text) {
+  try {
+    if (window.crypto?.subtle?.digest) {
+      const enc = new TextEncoder().encode(text);
+      const buf = await window.crypto.subtle.digest('SHA-256', enc);
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+  } catch(e) { Logger.warn('SHA-256 해시 실패 — 평문으로 폴백:', e); }
+  return text;
+}
+
+// 현재 저장된 관리자/팀 비밀번호의 해시를 반환.
+// adminPwHash/teamPwHash(신규, 해시 저장)가 있으면 그걸 쓰고,
+// 예전에 평문(adminPw/teamPw)으로 저장된 레거시 데이터면 그 자리에서 해시해서 비교용으로 반환.
+async function getAdminPwHash() {
+  try {
+    const c = await getConfig();
+    if (c.adminPwHash) return c.adminPwHash;
+    if (c.adminPw) return await sha256Hex(c.adminPw);
+  } catch {}
+  return await sha256Hex(INITIAL_MASTER_KEY);
+}
+async function getTeamPwHash() {
+  try {
+    const c = await getConfig();
+    if (c.teamPwHash) return c.teamPwHash;
+    if (c.teamPw) return await sha256Hex(c.teamPw);
+  } catch {}
+  return await sha256Hex(DEFAULT_TEAM_PW);
+}
+// 로컬 캐시(config)로부터 즉시 비교용 해시를 얻음 — 캐시가 신규(해시)/레거시(평문) 어느 쪽이든 대응
+async function hashFromCachedConfig(cached, hashKey, plainKey, fallbackPlain) {
+  if (cached?.[hashKey]) return cached[hashKey];
+  if (cached?.[plainKey]) return await sha256Hex(cached[plainKey]);
+  return await sha256Hex(fallbackPlain);
 }
 
 function checkLogin() {
@@ -1048,20 +1091,22 @@ async function doLogin() {
   };
 
   try {
+    const pwHash = await sha256Hex(pw);
+
     // ① 캐시로 즉시 검증 (Supabase 503/오프라인 대응)
     const cached = getCachedConfig();
-    const cachedAdmin = cached?.adminPw || INITIAL_MASTER_KEY;
-    const cachedTeam  = cached?.teamPw  || DEFAULT_TEAM_PW;
-    if (pw === cachedAdmin) { loginSuccess('ADMIN'); return; }
-    if (pw === cachedTeam)  { loginSuccess('MEMBER'); return; }
+    const cachedAdminHash = await hashFromCachedConfig(cached, 'adminPwHash', 'adminPw', INITIAL_MASTER_KEY);
+    const cachedTeamHash  = await hashFromCachedConfig(cached, 'teamPwHash',  'teamPw',  DEFAULT_TEAM_PW);
+    if (pwHash === cachedAdminHash) { loginSuccess('ADMIN'); return; }
+    if (pwHash === cachedTeamHash)  { loginSuccess('MEMBER'); return; }
 
-    // ② Supabase에서 실제 현재 비밀번호 조회 (3초 타임아웃)
-    // getAdminPw/getTeamPw는 설정된 값이 없으면 이미 기본값으로 폴백하므로
+    // ② Supabase에서 실제 현재 비밀번호(해시) 조회 (3초 타임아웃)
+    // getAdminPwHash/getTeamPwHash는 설정된 값이 없으면 이미 기본값으로 폴백하므로
     // 이 결과가 최종 판단 기준입니다 — 별도의 기본값 우회 통로를 두지 않습니다.
-    const adminPw = await getAdminPw();
-    if (pw === adminPw) { loginSuccess('ADMIN'); return; }
-    const teamPw = await getTeamPw();
-    if (pw === teamPw)  { loginSuccess('MEMBER'); return; }
+    const adminHash = await getAdminPwHash();
+    if (pwHash === adminHash) { loginSuccess('ADMIN'); return; }
+    const teamHash = await getTeamPwHash();
+    if (pwHash === teamHash)  { loginSuccess('MEMBER'); return; }
 
     err.style.display = 'block';
     document.getElementById('loginPw').value = '';
@@ -1095,7 +1140,12 @@ async function saveTeamPw() {
   if (!pw) { msg.style.display='block'; msg.style.color='var(--red)'; msg.textContent='비밀번호를 입력하세요'; return; }
   if (pw !== pw2) { msg.style.display='block'; msg.style.color='var(--red)'; msg.textContent='비밀번호가 일치하지 않습니다'; return; }
   if (pw.length < 4) { msg.style.display='block'; msg.style.color='var(--red)'; msg.textContent='4자 이상 입력하세요'; return; }
-  try { await setConfig({ teamPw: pw }); msg.style.display='block'; msg.style.color='var(--green)'; msg.textContent='✅ 팀 비밀번호 변경됨'; setTimeout(() => document.getElementById('adminPwModal').style.display='none', 1500); }
+  try {
+    const teamPwHash = await sha256Hex(pw);
+    // teamPw(구 평문 필드)는 undefined로 지정해 저장 시 함께 제거 — 평문이 남아있지 않도록 함
+    await setConfig({ teamPwHash, teamPw: undefined });
+    msg.style.display='block'; msg.style.color='var(--green)'; msg.textContent='✅ 팀 비밀번호 변경됨'; setTimeout(() => document.getElementById('adminPwModal').style.display='none', 1500);
+  }
   catch(e) { msg.style.display='block'; msg.style.color='var(--red)'; msg.textContent='저장 실패: '+e.message; }
 }
 async function saveRegionPrefix() {
@@ -1117,9 +1167,15 @@ async function saveAdminPw() {
   if (!cur) { msg.style.display='block'; msg.style.color='var(--red)'; msg.textContent='현재 비밀번호를 입력하세요'; return; }
   if (!pw || pw !== pw2) { msg.style.display='block'; msg.style.color='var(--red)'; msg.textContent= pw ? '새 비밀번호가 일치하지 않습니다' : '새 비밀번호를 입력하세요'; return; }
   if (pw.length < 6) { msg.style.display='block'; msg.style.color='var(--red)'; msg.textContent='6자 이상 입력하세요'; return; }
-  const adminPw = await getAdminPw();
-  if (cur !== adminPw) { msg.style.display='block'; msg.style.color='var(--red)'; msg.textContent='현재 비밀번호가 틀립니다'; return; }
-  try { await setConfig({ adminPw: pw }); msg.style.display='block'; msg.style.color='var(--green)'; msg.textContent='✅ 관리자 비밀번호 변경됨'; setTimeout(() => document.getElementById('adminPwModal').style.display='none', 1500); }
+  const curHash = await sha256Hex(cur);
+  const adminHash = await getAdminPwHash();
+  if (curHash !== adminHash) { msg.style.display='block'; msg.style.color='var(--red)'; msg.textContent='현재 비밀번호가 틀립니다'; return; }
+  try {
+    const newHash = await sha256Hex(pw);
+    // adminPw(구 평문 필드)는 undefined로 지정해 저장 시 함께 제거 — 평문이 남아있지 않도록 함
+    await setConfig({ adminPwHash: newHash, adminPw: undefined });
+    msg.style.display='block'; msg.style.color='var(--green)'; msg.textContent='✅ 관리자 비밀번호 변경됨'; setTimeout(() => document.getElementById('adminPwModal').style.display='none', 1500);
+  }
   catch(e) { msg.style.display='block'; msg.style.color='var(--red)'; msg.textContent='저장 실패: '+e.message; }
 }
 
@@ -1199,7 +1255,7 @@ document.addEventListener('DOMContentLoaded', () => {
     showToast(`☁ 클라우드 동기화 완료 (${mergedArr.length}건)`, 'success');
   }).catch(e => {
     Logger.warn('Supabase 불러오기 실패 — 로컬 데이터 사용:', e);
-    showToast('⚠ 오프라인 모드 — 로컬 데이터 사용 중', '');
+    showToast('⚠ 클라우드 동기화 실패(오프라인 모드로 전환): ' + (e?.message || '알 수 없는 오류'), 'error');
   });
 });
 
@@ -3077,7 +3133,7 @@ function submitForm() {
     localStorage.setItem('hydrant_records', JSON.stringify(state.records));
   }).catch(e => {
     Logger.warn('Supabase 저장 실패 (로컬에는 저장됨):', e);
-    showToast('⚠ 클라우드 저장 실패 - 로컬에 저장됨', 'error');
+    showToast('⚠ 클라우드 저장 실패: ' + (e?.message || '알 수 없는 오류'), 'error');
   });
 
   updateCounter();
@@ -3366,8 +3422,13 @@ function deleteRecord(id) {
   if (!confirm(`용수번호 ${r.hydrantId} 점검 기록을 삭제하시겠습니까?`)) return;
   state.records = state.records.filter(rec => rec.id !== r.id);
   localStorage.setItem('hydrant_records', JSON.stringify(state.records));
-  deleteFromSupabase(r.id).catch(e => Logger.warn('Supabase 삭제 실패:', e));
   updateCounter(); renderList(); showToast('🗑 삭제되었습니다', '');
+  deleteFromSupabase(r.id).catch(e => {
+    Logger.warn('Supabase 삭제 실패:', e);
+    // 로컬에서는 이미 지워졌지만 클라우드에는 남아있을 수 있어 반드시 알려줘야 함
+    // (다른 기기와 동기화될 때 삭제한 기록이 다시 나타날 수 있음)
+    showToast('⚠ 로컬은 삭제됐지만 클라우드 삭제 실패: ' + (e?.message || '알 수 없는 오류'), 'error');
+  });
 }
 
 // ── Modal ─────────────────────────────────────────────
@@ -3445,7 +3506,12 @@ function closeModalDirect() { document.getElementById('modalOverlay').classList.
 function showToast(msg, type = '') {
   const t = document.getElementById('toast');
   t.textContent = msg; t.className = `toast ${type} show`;
-  setTimeout(() => t.classList.remove('show'), 2500);
+  if (t._hideTimer) clearTimeout(t._hideTimer);
+  // 에러 메시지는 캡처할 시간을 주기 위해 더 오래 표시 (성공/일반 메시지는 기존대로 2.5초)
+  const duration = type === 'error' ? 6000 : 2500;
+  t._hideTimer = setTimeout(() => t.classList.remove('show'), duration);
+  // 토스트를 탭하면 자동으로 안 사라지게 고정 — 캡처할 시간이 더 필요할 때 사용
+  t.onclick = () => { if (t._hideTimer) clearTimeout(t._hideTimer); };
 }
 
 // ── 현위치 주변 소화전 찾기 ───────────────────────────
