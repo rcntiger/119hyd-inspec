@@ -956,10 +956,28 @@ function setCachedConfig(data) {
 function withTimeout(promise, ms = 3000) {
   return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
 }
+
+// Supabase가 절전 상태에서 깨어나는 순간 등에 일시적으로 나는
+// "could not query the database for the schema cache" 오류는 보통 몇 초 안에 저절로 풀리므로,
+// 이 오류일 때만 짧게 대기 후 자동 재시도한다 (그 외 오류는 바로 그대로 던짐)
+async function withSchemaCacheRetry(fn, retries = 2, delayMs = 1500) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      const isSchemaCacheErr = /schema cache/i.test(e?.message || '');
+      if (!isSchemaCacheErr || i === retries) throw e;
+      Logger.warn(`[withSchemaCacheRetry] 스키마 캐시 오류 — ${delayMs}ms 후 재시도 (${i + 1}/${retries})`);
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+  }
+}
+
 async function getConfig() {
   try {
     const rows = await withTimeout(
-      SupabaseUtil.select('inspections', { columns: 'data', eq: { id: -1 }, limit: 1 })
+      withSchemaCacheRetry(() => SupabaseUtil.select('inspections', { columns: 'data', eq: { id: -1 }, limit: 1 })),
+      8000
     );
     const cfg = rows?.[0]?.data;
     if (!cfg) return getCachedConfig() || {};
@@ -971,8 +989,9 @@ async function setConfig(patch) {
   const current = await getConfig();
   const merged = { ...current, ...patch };
   await withTimeout(
-    SupabaseUtil.upsert('inspections',
-      { id: -1, hydrant_id: '__config__', insp_date: '', insp_name: '', data: merged }, 'id')
+    withSchemaCacheRetry(() => SupabaseUtil.upsert('inspections',
+      { id: -1, hydrant_id: '__config__', insp_date: '', insp_name: '', data: merged }, 'id')),
+    8000 // 재시도 텀까지 감안해 타임아웃 넉넉히
   );
   setCachedConfig(merged);
 }
@@ -3509,6 +3528,113 @@ function findNearby() {
 }
 
 // ── 엑셀 가져오기 ─────────────────────────────────────
+// 소화전 엑셀 컬럼 정의 (자동 인식 실패 시 수동 매핑 모달에서 사용)
+const HYDRANT_EXCEL_COLUMNS = [
+  { id: 'id',           label: '용수번호',       required: true,  keywords: ['용수번호','소화전번호'] },
+  { id: 'group',        label: '용수그룹',       required: false, keywords: ['나의용수그룹','용수그룹','그룹'] },
+  { id: 'installDate',  label: '설치일',         required: false, keywords: ['설치일'] },
+  { id: 'improveDate',  label: '개선설치일',     required: false, keywords: ['개선설치일'] },
+  { id: 'addrRoad',     label: '설치위치(도로명)', required: false, keywords: ['설치위치','도로명주소','도로명'] },
+  { id: 'paintDate',    label: '도색년월일',     required: false, keywords: ['도색년월일'] },
+  { id: 'depth',        label: '심도',           required: false, keywords: ['심도'] },
+  { id: 'insulDate',    label: '보온년월일',     required: false, keywords: ['보온년월일'] },
+  { id: 'typeRaw',      label: '식구분',         required: false, keywords: ['식구분'] },
+  { id: 'resultRaw',    label: '사용가부',       required: false, keywords: ['사용가부'] },
+  { id: 'area',         label: '설치지역',       required: false, keywords: ['설치지역'] },
+  { id: 'roadType',     label: '설치도로구분',   required: false, keywords: ['설치도로구분'] },
+  { id: 'coverType',    label: '철개형식',       required: false, keywords: ['철개형식'] },
+  { id: 'coverKind',    label: '철개종류',       required: false, keywords: ['철개종류'] },
+  { id: 'signboard',    label: '표지판유무',     required: false, keywords: ['표지판유무'] },
+  { id: 'roadMarkRaw',  label: '적색노면표시',   required: false, keywords: ['적색노면표시'] },
+  { id: 'reflector',    label: '반사판유무',     required: false, keywords: ['반사판유무'] },
+  { id: 'protectFrame', label: '보호틀유무',     required: false, keywords: ['보호틀유무'] },
+  { id: 'lat',          label: '위도',           required: false, keywords: ['위도','latitude','lat'] },
+  { id: 'lng',          label: '경도',           required: false, keywords: ['경도','longitude','lng','lon'] },
+];
+let _hydrantExcelReader = null;
+
+// 수동 매핑 결과(2D rows + colId→colIndex)를 앱 내부 소화전 목록 형식으로 변환
+function buildListFromManualMapping(rows2d, mapping) {
+  const get = (row, colId) => {
+    const idx = mapping[colId];
+    return (idx !== null && idx !== undefined && row[idx] !== undefined) ? String(row[idx]).trim() : '';
+  };
+  return rows2d.filter(row => get(row, 'id')).map(row => {
+    const rawId = get(row, 'id');
+    const numOnly = rawId.replace(/\D/g, '');
+    if (!numOnly) return null;
+    const latStr = get(row, 'lat'), lngStr = get(row, 'lng');
+    return {
+      id: numOnly.padStart(6, '0'), rawId,
+      group: get(row,'group'), installDate: get(row,'installDate'), improveDate: get(row,'improveDate'),
+      addrRoad: get(row,'addrRoad'), paintDate: get(row,'paintDate'), insulDate: get(row,'insulDate'),
+      depth: get(row,'depth'), typeRaw: get(row,'typeRaw'), resultRaw: get(row,'resultRaw'),
+      area: get(row,'area'), roadType: get(row,'roadType'), coverType: get(row,'coverType'),
+      coverKind: get(row,'coverKind'), signboard: get(row,'signboard'), roadMarkRaw: get(row,'roadMarkRaw'),
+      reflector: get(row,'reflector'), protectFrame: get(row,'protectFrame'),
+      lat: latStr ? parseFloat(latStr) : null, lng: lngStr ? parseFloat(lngStr) : null,
+    };
+  }).filter(Boolean);
+}
+
+// 자동 인식이 실패했을 때 — 시트 선택/헤더행 선택/컬럼 직접 지정이 가능한 수동 매핑 모달을 띄움
+// (헤더가 여러 줄이거나 병합셀, 컬럼명이 다르거나, 시트가 여러 개인 정리 안 된 엑셀 대응)
+function openManualExcelMapping(file) {
+  if (!_hydrantExcelReader) {
+    _hydrantExcelReader = ExcelUtil.createReader({
+      columns: HYDRANT_EXCEL_COLUMNS,
+      forwardFill: true,
+      confirmLabel: '이 매핑으로 불러오기',
+      onConfirm: (headers, rows2d, mapping) => {
+        const list = buildListFromManualMapping(rows2d, mapping);
+        if (list.length === 0) { showToast('매핑된 데이터가 없습니다. 컬럼 지정을 다시 확인해주세요.', 'error'); return; }
+        finalizeImportedList(list);
+      }
+    });
+  }
+  showToast('⚠ 자동 인식에 실패해 수동 매핑 화면을 엽니다', '');
+  _hydrantExcelReader.open(file);
+}
+
+// 목록 확정 후 공통 마무리 처리 (자동 인식 성공 / 수동 매핑 완료 양쪽에서 공용으로 사용)
+function finalizeImportedList(list) {
+  // 기존 점검 기록이 있으면 함께 삭제할지 확인 (팀/그룹 교체 시 새로 시작하기 위함)
+  if (state.records.length > 0) {
+    const wipe = confirm(
+      `기존 점검 기록 ${state.records.length}건이 있습니다.\n\n` +
+      `새 소화전 목록을 불러오면서 이 기록도 함께 삭제할까요?\n\n` +
+      `[확인] = 기존 기록 삭제 후 새로 시작\n[취소] = 기록은 유지하고 목록만 교체`
+    );
+    if (wipe) {
+      showToast('🗑 기존 점검 기록 삭제 중...', '');
+      const oldRecords = [...state.records];
+      state.records = [];
+      localStorage.removeItem('hydrant_records');
+      renderList();
+      updateCounter();
+      // Supabase에서도 각 기록 삭제 (실패해도 로컬은 이미 비워진 상태 유지)
+      Promise.allSettled(oldRecords.map(r => deleteFromSupabase(r.id))).then(results => {
+        const failed = results.filter(r => r.status === 'rejected').length;
+        if (failed > 0) Logger.warn(`Supabase 기록 삭제 중 ${failed}건 실패`);
+        showToast('✅ 기존 점검 기록이 삭제되었습니다', 'success');
+      });
+    }
+  }
+
+  state.importedList = list;
+  try { localStorage.setItem('hydrant_imported_list', JSON.stringify(list)); }
+  catch(e) { Logger.warn('엑셀 목록 로컬 저장 실패(용량 초과 등):', e); }
+  updateHydrantSelect();
+  updateExcelProgress();
+  switchTab('list');               // 먼저 탭 전환
+  setTimeout(() => {
+    showImportedList(list);        // 탭 전환 후 목록 표시 (renderList 덮어쓰기 방지)
+  }, 50);
+  showToast(`✅ ${list.length}개 소화전 목록을 가져왔습니다`, 'success');
+  // 위도/경도 없는 항목은 백그라운드에서 주소 기반으로 좌표 채워넣기 ("주변 소화전 찾기" 기능용)
+  geocodeImportedListInBackground();
+}
+
 async function importExcel(input) {
   const file = input.files[0]; if (!file) return;
   try {
@@ -3547,6 +3673,14 @@ async function importExcel(input) {
     const cLat      = col(['위도','latitude','lat']);
     const cLng      = col(['경도','longitude','lng','lon']);
 
+    // 자동 인식 실패(용수번호 컬럼을 못 찾음) → 수동 매핑 모달로 전환
+    if (cId < 0) {
+      Logger.debug('[importExcel] 용수번호 컬럼 자동 인식 실패 → 수동 매핑 전환');
+      openManualExcelMapping(file);
+      input.value = '';
+      return;
+    }
+
     const list = rows.slice(headerRow + 1).filter(row => row[cId] && String(row[cId]).trim()).map(row => {
       const rawId = String(row[cId]||'').trim();
       const numOnly = rawId.replace(/\D/g,'');
@@ -3576,41 +3710,15 @@ async function importExcel(input) {
       };
     }).filter(Boolean);
 
-    // 기존 점검 기록이 있으면 함께 삭제할지 확인 (팀/그룹 교체 시 새로 시작하기 위함)
-    if (state.records.length > 0) {
-      const wipe = confirm(
-        `기존 점검 기록 ${state.records.length}건이 있습니다.\n\n` +
-        `새 소화전 목록을 불러오면서 이 기록도 함께 삭제할까요?\n\n` +
-        `[확인] = 기존 기록 삭제 후 새로 시작\n[취소] = 기록은 유지하고 목록만 교체`
-      );
-      if (wipe) {
-        showToast('🗑 기존 점검 기록 삭제 중...', '');
-        const oldRecords = [...state.records];
-        state.records = [];
-        localStorage.removeItem('hydrant_records');
-        renderList();
-        updateCounter();
-        // Supabase에서도 각 기록 삭제 (실패해도 로컬은 이미 비워진 상태 유지)
-        Promise.allSettled(oldRecords.map(r => deleteFromSupabase(r.id))).then(results => {
-          const failed = results.filter(r => r.status === 'rejected').length;
-          if (failed > 0) Logger.warn(`Supabase 기록 삭제 중 ${failed}건 실패`);
-          showToast('✅ 기존 점검 기록이 삭제되었습니다', 'success');
-        });
-      }
+    // 컬럼은 찾았지만 실제 유효한 행이 하나도 안 나온 경우도 자동 인식 실패로 간주 → 수동 매핑
+    if (list.length === 0) {
+      Logger.debug('[importExcel] 자동 인식된 컬럼으로 유효 데이터 0건 → 수동 매핑 전환');
+      openManualExcelMapping(file);
+      input.value = '';
+      return;
     }
 
-    state.importedList = list;
-    try { localStorage.setItem('hydrant_imported_list', JSON.stringify(list)); }
-    catch(e) { Logger.warn('엑셀 목록 로컬 저장 실패(용량 초과 등):', e); }
-    updateHydrantSelect();
-    updateExcelProgress();
-    switchTab('list');               // 먼저 탭 전환
-    setTimeout(() => {
-      showImportedList(list);        // 탭 전환 후 목록 표시 (renderList 덮어쓰기 방지)
-    }, 50);
-    showToast(`✅ ${list.length}개 소화전 목록을 가져왔습니다`, 'success');
-    // 위도/경도 없는 항목은 백그라운드에서 주소 기반으로 좌표 채워넣기 ("주변 소화전 찾기" 기능용)
-    geocodeImportedListInBackground();
+    finalizeImportedList(list);
   } catch(err) {
     Logger.error('엑셀 읽기 실패:', err);
     showToast('엑셀 파일을 읽는 데 실패했습니다: ' + err.message, 'error');
@@ -3692,7 +3800,7 @@ function showImportedList(list, sortMode) {
             <span style="font-size:12px;color:var(--gray-4);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(item.addrRoad||'').replace(/^서울특별시\s*|^부산광역시\s*|^인천광역시\s*|^대구광역시\s*|^광주광역시\s*|^대전광역시\s*|^울산광역시\s*/,'')}</span>
             ${done
               ? '<span style="font-size:11px;color:#1A7A45;font-weight:700;flex-shrink:0;background:#EAF5EE;border:1px solid #9FD4B0;padding:4px 10px;border-radius:20px">✓ 완료</span>'
-              : `<button onclick="event.stopPropagation();fillHydrantId('${item.id}')" style="flex-shrink:0;padding:5px 10px;background:#C8230A;color:white;border:none;border-radius:20px;font-family:'Noto Sans KR',sans-serif;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:3px">점검하기 ▶</button>`}
+              : `<button onclick="event.stopPropagation();fillHydrantId('${item.id}')" style="flex-shrink:0;padding:5px 10px;background:#C8230A;color:white;border:none;border-radius:20px;font-family:'Noto Sans KR',sans-serif;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:3px">점검 ▶</button>`}
           </div>`;
         }).join('')}
       </div>
