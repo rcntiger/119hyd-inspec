@@ -361,7 +361,7 @@ textarea{resize:vertical;min-height:70px;line-height:1.5}
             style="font-size:17px;font-weight:700;padding:12px 40px 12px 14px;letter-spacing:2px;font-family:'IBM Plex Mono',monospace;text-align:center;border:2px solid var(--gray-2);border-radius:10px;width:100%;transition:border-color .15s"/>
           <!-- 지우기 버튼 (입력창 내부) -->
           <button id="hydrantClearBtn" onclick="clearHydrantInput()" style="display:none;position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--gray-3);font-size:20px;cursor:pointer;padding:0;line-height:1">×</button>
-          <div id="hydrantDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:9999;background:white;border:2px solid #1A5CA8;border-top:none;border-radius:0 0 12px 12px;max-height:280px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.18)"></div>
+          <div id="hydrantDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:9999;background:white;border:2px solid #1A5CA8;border-top:none;border-radius:0 0 12px 12px;max-height:280px;overflow-y:auto;overflow-x:hidden;box-shadow:0 8px 24px rgba(0,0,0,0.18)"></div>
         </div>
         <!-- 현위치 주변 찾기 버튼 -->
         <div id="nearbyBtnWrap" style="display:none;flex-shrink:0">
@@ -1261,7 +1261,7 @@ function switchTab(tab) {
 
     // 입력 필드/지도/드롭다운/모달/사진 위에서는 스와이프 무시 (오작동 방지)
     const el = e.target;
-    if (el.closest('input, textarea, select, #xiMapContainer, #kakaoMapContainer, .modal, .modal-overlay.open, .photo-thumb, .photo-slot')) return;
+    if (el.closest('input, textarea, select, #xiMapContainer, #kakaoMapContainer, .modal, .modal-overlay.open, .photo-thumb, .photo-slot, #hydrantDropdown')) return;
 
     // 탭 순서: [점검 목록(왼쪽)] → [점검 입력(오른쪽)]
     const currentlyList = !document.getElementById('tab-list').classList.contains('hidden');
@@ -2029,7 +2029,7 @@ function _initXiMap(fLat, fLng, addr) {
     const initScale = getMarkerScaleForLevel(_xiMap.getLevel());
     _xiMarkerHydrant = new kakao.maps.Marker({ position: center, map: _xiMap, title: '소화전 위치', image: getHydrantMarkerImage(initScale) });
     _xiInfoHydrant = new kakao.maps.CustomOverlay({
-      position: center, map: _xiMap, xAnchor: 0.5, yAnchor: 1.1, zIndex: 4,
+      position: center, map: _xiMap, xAnchor: 0.5, yAnchor: 1.3, zIndex: 4,
       content: xiLabelHTML(getHydrantMapLabelText(), getHydrantTypeColor())
     });
   } else {
