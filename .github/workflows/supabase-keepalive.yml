@@ -1,0 +1,25 @@
+name: Supabase Keep-Alive Ping
+
+# 매일 한 번 + 수동 실행 버튼(workflow_dispatch)도 지원
+on:
+  schedule:
+    - cron: '0 3 * * *'   # 매일 UTC 03:00 = 한국시간(KST) 12:00
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase inspections table to prevent auto-pause
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://uxbbzvvkpebdvdjobnyz.supabase.co/rest/v1/inspections?select=id&limit=1" \
+            -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV4YmJ6dnZrcGViZHZkam9ibnl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwMTIzNTQsImV4cCI6MjA4OTU4ODM1NH0.PvCMpxSv-B3woWKfjxEkoyv1gDdjEHZy3_lvWVrSz2E" \
+            -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV4YmJ6dnZrcGViZHZkam9ibnl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwMTIzNTQsImV4cCI6MjA4OTU4ODM1NH0.PvCMpxSv-B3woWKfjxEkoyv1gDdjEHZy3_lvWVrSz2E")
+          echo "Supabase ping status: $STATUS"
+          if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 300 ]; then
+            echo "✅ Ping succeeded"
+          else
+            echo "⚠️ Ping returned non-2xx status: $STATUS"
+            exit 1
+          fi
