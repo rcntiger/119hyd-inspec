@@ -62,6 +62,7 @@ input[type=text],input[type=date],input[type=number],textarea,select{
 }
 input:focus,textarea:focus,select:focus{border-color:var(--red)}
 input[readonly]{background:var(--gray-1);color:var(--gray-4);font-family:'IBM Plex Mono',monospace;font-size:12px}
+#hydrantIdRaw::placeholder{font-size:13px;font-weight:500;letter-spacing:normal}
 input[disabled]{background:var(--gray-1);color:var(--gray-3);cursor:not-allowed}
 textarea{resize:vertical;min-height:70px;line-height:1.5}
 
@@ -2028,7 +2029,7 @@ function _initXiMap(fLat, fLng, addr) {
     const initScale = getMarkerScaleForLevel(_xiMap.getLevel());
     _xiMarkerHydrant = new kakao.maps.Marker({ position: center, map: _xiMap, title: '소화전 위치', image: getHydrantMarkerImage(initScale) });
     _xiInfoHydrant = new kakao.maps.CustomOverlay({
-      position: center, map: _xiMap, xAnchor: 0.5, yAnchor: 1.8, zIndex: 4,
+      position: center, map: _xiMap, xAnchor: 0.5, yAnchor: 1.1, zIndex: 4,
       content: xiLabelHTML(getHydrantMapLabelText(), getHydrantTypeColor())
     });
   } else {
@@ -3472,48 +3473,34 @@ function findNearby() {
     note.style.display = 'block';
     note.textContent = label;
 
-    // 드롭다운을 거리순으로 재구성
+    // 검색창 드롭다운에 거리순 결과 채우기 (실제 쓰는 UI: hydrantIdRaw + hydrantDropdown)
     const criteria = document.getElementById('agedCriteria')?.value || '';
-    const sel = document.getElementById('hydrantSelect');
-    sel.innerHTML = '<option value="">— 목록에서 선택하세요 —</option>';
-
-    // 구분선: 주변 결과
-    const grp1 = document.createElement('optgroup');
-    grp1.label = nearby.length > 0 ? `🔵 100m 이내 (${nearby.length}개)` : `🔵 가까운 순 (${displayList.length}개)`;
-    displayList.forEach(item => {
-      const done = state.records.some(r => r.hydrantId === item.id);
-      const aged = criteria && item.installDate && item.installDate <= criteria && !(item.improveDate && item.improveDate.trim());
-      const opt = document.createElement('option');
-      opt.value = item.id;
-      opt.style.color = done ? '#888' : '';
-      const parts = [item.id, formatDist(item.dist)];
-      if (aged) parts.push('⚠노후');
-      if (item.addrRoad) parts.push(item.addrRoad.slice(0, 15));
-      if (done) parts.push('✓점검완료');
-      opt.textContent = parts.join('  ');
-      grp1.appendChild(opt);
-    });
-    sel.appendChild(grp1);
-
-    // 구분선: 나머지 전체
-    const rest = withDist.filter(i => !displayList.includes(i));
-    if (rest.length > 0) {
-      const grp2 = document.createElement('optgroup');
-      grp2.label = `나머지 (${rest.length}개)`;
-      rest.forEach(item => {
+    const dd = document.getElementById('hydrantDropdown');
+    if (dd) {
+      const renderRow = (item) => {
         const done = state.records.some(r => r.hydrantId === item.id);
         const aged = criteria && item.installDate && item.installDate <= criteria && !(item.improveDate && item.improveDate.trim());
-        const opt = document.createElement('option');
-        opt.value = item.id;
-        opt.style.color = done ? '#888' : '';
-        const parts = [item.id, formatDist(item.dist)];
-        if (aged) parts.push('⚠노후');
-        if (item.addrRoad) parts.push(item.addrRoad.slice(0, 15));
-        if (done) parts.push('✓점검완료');
-        opt.textContent = parts.join('  ');
-        grp2.appendChild(opt);
-      });
-      sel.appendChild(grp2);
+        const rawT = (item.typeRaw||'').trim();
+        const isG  = rawT.includes('지상') || rawT === '1' || rawT === 'G';
+        const typeTag = rawT ? `<span style="font-size:11px;padding:1px 6px;border-radius:10px;font-weight:700;flex-shrink:0;${isG?'background:#FFF0EE;color:#C8230A':'background:#EEF5FF;color:#1A5CA8'}">${isG?'지상':'지하'}</span>` : '';
+        const addr = (item.addrRoad||'').replace(/^서울특별시\s*|^부산광역시\s*|^인천광역시\s*|^대구광역시\s*|^광주광역시\s*|^대전광역시\s*|^울산광역시\s*|^세종특별자치시\s*/,'');
+        return `<div onmousedown="pickHydrant('${item.id}')"
+          style="display:flex;align-items:center;gap:8px;padding:13px 14px;border-bottom:1px solid #F0F0EC;cursor:pointer;background:${done?'#F4FBF5':'white'}"
+          ontouchstart="this.style.background='#EEF5FF'" onmouseover="this.style.background='#EEF5FF'" onmouseout="this.style.background='${done?'#F4FBF5':'white'}'">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:700;color:${done?'var(--gray-3)':'var(--dark)'};min-width:60px">${item.id}</span>
+          <span style="font-size:11px;font-weight:700;color:white;background:#1A5CA8;padding:2px 7px;border-radius:10px;flex-shrink:0">${formatDist(item.dist)}</span>
+          ${typeTag}
+          ${aged?'<span style="font-size:11px;background:#F5C400;color:#5A3E00;padding:2px 6px;border-radius:6px;font-weight:700;flex-shrink:0">⚠노후</span>':''}
+          <span style="font-size:12px;color:var(--gray-4);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${addr}</span>
+          ${done?'<span style="font-size:12px;color:var(--green);font-weight:700;flex-shrink:0">✓완료</span>':'<span style="font-size:12px;color:var(--red);font-weight:700;flex-shrink:0">●미완료</span>'}
+        </div>`;
+      };
+      const rest = withDist.filter(i => !displayList.includes(i));
+      dd.innerHTML =
+        `<div style="padding:8px 14px;background:#EEF5FF;font-size:11px;font-weight:700;color:#1A5CA8">${nearby.length > 0 ? `🔵 100m 이내 (${nearby.length}개)` : `🔵 가까운 순 (${displayList.length}개)`}</div>` +
+        displayList.map(renderRow).join('') +
+        (rest.length > 0 ? `<div style="padding:8px 14px;background:var(--gray-1);font-size:11px;font-weight:700;color:var(--gray-4)">나머지 (${rest.length}개)</div>` + rest.slice(0, 30).map(renderRow).join('') : '');
+      dd.style.display = 'block';
     }
 
     showToast(`✅ ${label}`, 'success');
@@ -3740,6 +3727,18 @@ function hideHydrantDropdown() {
     if (raw.length > 0) input.value = raw.padStart(6,'0');
   }, 200);
 }
+
+// 입력창에 포커스가 없는 상태(예: "🎯 주변 소화전" 버튼)로 드롭다운이 열린 경우까지 포함해서,
+// 화면 아무 곳이나 터치하면 확실히 닫히도록 하는 전역 감시 리스너
+document.addEventListener('click', e => {
+  const dd = document.getElementById('hydrantDropdown');
+  if (!dd || dd.style.display === 'none') return;
+  const input = document.getElementById('hydrantIdRaw');
+  if (e.target === input) return;               // 입력창 자체는 제외 (focus 이벤트가 따로 처리)
+  if (dd.contains(e.target)) return;             // 드롭다운 내부 클릭은 pickHydrant가 처리
+  if (e.target.closest && e.target.closest('#nearbyBtnWrap')) return; // 주변 소화전 버튼 클릭 직후는 제외
+  dd.style.display = 'none';
+});
 
 function renderHydrantDropdown(query) {
   const dd = document.getElementById('hydrantDropdown');
