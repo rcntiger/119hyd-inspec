@@ -803,9 +803,10 @@ textarea{resize:vertical;min-height:70px;line-height:1.5}
 
   <!-- 그룹 필터 (엑셀 가져온 경우만 표시) -->
   <div id="listGroupFilterWrap" style="display:none;margin-bottom:8px">
+    <div style="font-size:11px;color:#7B00A0;font-weight:700;margin-bottom:4px">📁 그룹별 목록 보기</div>
     <select id="listGroupFilter" onchange="onListGroupFilterChange()"
       style="width:100%;padding:9px 11px;border:1.5px solid #7B00A0;border-radius:8px;font-family:'Noto Sans KR',sans-serif;font-size:13px;font-weight:600;color:#7B00A0;background:#FDE8FF;outline:none">
-      <option value="">전체 그룹</option>
+      <option value="">전체 그룹 (모든 소화전 표시)</option>
     </select>
   </div>
 
@@ -2029,7 +2030,7 @@ function _initXiMap(fLat, fLng, addr) {
     const initScale = getMarkerScaleForLevel(_xiMap.getLevel());
     _xiMarkerHydrant = new kakao.maps.Marker({ position: center, map: _xiMap, title: '소화전 위치', image: getHydrantMarkerImage(initScale) });
     _xiInfoHydrant = new kakao.maps.CustomOverlay({
-      position: center, map: _xiMap, xAnchor: 0.5, yAnchor: 1.3, zIndex: 4,
+      position: center, map: _xiMap, xAnchor: 0.5, yAnchor: 1.5, zIndex: 4,
       content: xiLabelHTML(getHydrantMapLabelText(), getHydrantTypeColor())
     });
   } else {
@@ -3914,7 +3915,7 @@ function updateListGroupFilter(groups) {
   if (!groups || groups.length === 0) { wrap.style.display = 'none'; return; }
   wrap.style.display = 'block';
   const cur = sel.value;
-  sel.innerHTML = '<option value="">전체 그룹</option>' +
+  sel.innerHTML = '<option value="">전체 그룹 (모든 소화전 표시)</option>' +
     groups.map(g => {
       const cnt = state.importedList.filter(i => i.group === g).length;
       return `<option value="${g}" ${g===cur?'selected':''}>${g}(${cnt}개)</option>`;
