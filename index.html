@@ -819,12 +819,10 @@ textarea{resize:vertical;min-height:70px;line-height:1.5}
     <div id="listCount" style="font-size:12px;color:var(--gray-4);font-weight:500;white-space:nowrap">0건</div>
   </div>
   <div id="sortBtnRow" style="display:flex;gap:6px;margin-bottom:10px;overflow-x:auto;padding-bottom:2px">
-    <button class="sort-btn" id="sort-date-desc" onclick="setSort('date-desc')">최신순</button>
-    <button class="sort-btn" id="sort-date-asc" onclick="setSort('date-asc')">오래된순</button>
-    <button class="sort-btn active" id="sort-id-asc" onclick="setSort('id-asc')">번호순</button>
-    <button class="sort-btn" id="sort-result" onclick="setSort('result')">불량 먼저</button>
-    <button class="sort-btn" id="sort-insp" onclick="setSort('insp')">점검자순</button>
-    <button class="sort-btn" id="sort-aged" onclick="setSort('aged')">노후 먼저</button>
+    <button class="sort-btn active" id="sort-id" onclick="toggleSortId()">번호</button>
+    <button class="sort-btn" id="sort-type" onclick="toggleSortType()">지하/지상</button>
+    <button class="sort-btn" id="sort-result" onclick="toggleSortResult()">사용가부</button>
+    <button class="sort-btn" id="sort-aged" onclick="setSort('aged')">노후</button>
   </div>
   <div id="recordList"></div>
 </div>
@@ -3399,8 +3397,28 @@ function updateExcelProgress() {
 function setSort(mode) {
   state.sortMode = mode;
   document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
-  const btn = document.getElementById('sort-' + mode); if(btn) btn.classList.add('active');
+  let btnId = 'sort-aged';
+  if (mode.startsWith('id-')) btnId = 'sort-id';
+  else if (mode.startsWith('type-')) btnId = 'sort-type';
+  else if (mode.startsWith('result-')) btnId = 'sort-result';
+  const btn = document.getElementById(btnId); if (btn) btn.classList.add('active');
+  // 지하/지상 버튼은 현재 정렬 순서를 라벨에 반영
+  const typeBtn = document.getElementById('sort-type');
+  if (typeBtn) typeBtn.textContent = mode === 'type-ground' ? '지상/지하' : '지하/지상';
   renderList();
+}
+
+// 번호 — 누를 때마다 오름차순 ↔ 내림차순 전환
+function toggleSortId() {
+  setSort(state.sortMode === 'id-asc' ? 'id-desc' : 'id-asc');
+}
+// 지하/지상 — 누를 때마다 지하식 먼저 ↔ 지상식 먼저 전환
+function toggleSortType() {
+  setSort(state.sortMode === 'type-under' ? 'type-ground' : 'type-under');
+}
+// 사용가부 — 누를 때마다 양호 먼저 ↔ 고장 먼저 전환
+function toggleSortResult() {
+  setSort(state.sortMode === 'result-good' ? 'result-bad' : 'result-good');
 }
 
 function isAged(record) {
@@ -3430,15 +3448,26 @@ function renderList() {
     }
     return true;
   });
-  const resultOrder = { '불량사용불가': 0, '불량사용가': 1, 'D': 2, 'C': 3, 'B': 4, 'A': 5 };
+  // 사용가부 정렬용 순서표 — 양호 먼저(A→D→고장) / 고장 먼저(사용불가→사용가→D→A)
+  const resultGoodOrder = { A:0, B:1, C:2, D:3, '불량사용가':4, '불량사용불가':5 };
+  const resultBadOrder  = { '불량사용불가':0, '불량사용가':1, D:2, C:3, B:4, A:5 };
   filtered = [...filtered].sort((a, b) => {
     if (state.sortMode === 'aged') { const aa = isAged(a) ? 0 : 1; const bb = isAged(b) ? 0 : 1; return aa - bb; }
     switch (state.sortMode) {
-      case 'date-desc': return (b.inspDate||'').localeCompare(a.inspDate||'') || b.id - a.id;
-      case 'date-asc':  return (a.inspDate||'').localeCompare(b.inspDate||'');
-      case 'id-asc':    return (a.hydrantId||'').localeCompare(b.hydrantId||'', 'ko');
-      case 'result':    return (resultOrder[a.inspResult]??9) - (resultOrder[b.inspResult]??9);
-      case 'insp':      return (a.inspName||'').localeCompare(b.inspName||'', 'ko');
+      case 'id-asc':  return (a.hydrantId||'').localeCompare(b.hydrantId||'', 'ko');
+      case 'id-desc': return (b.hydrantId||'').localeCompare(a.hydrantId||'', 'ko');
+      case 'type-under': {
+        const ga = a.hydrantType === 'underground' ? 0 : 1;
+        const gb = b.hydrantType === 'underground' ? 0 : 1;
+        return ga - gb || (a.hydrantId||'').localeCompare(b.hydrantId||'', 'ko');
+      }
+      case 'type-ground': {
+        const ga = a.hydrantType === 'ground' ? 0 : 1;
+        const gb = b.hydrantType === 'ground' ? 0 : 1;
+        return ga - gb || (a.hydrantId||'').localeCompare(b.hydrantId||'', 'ko');
+      }
+      case 'result-good': return (resultGoodOrder[a.inspResult]??9) - (resultGoodOrder[b.inspResult]??9);
+      case 'result-bad':  return (resultBadOrder[a.inspResult]??9) - (resultBadOrder[b.inspResult]??9);
       default: return 0;
     }
   });
