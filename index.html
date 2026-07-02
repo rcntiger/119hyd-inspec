@@ -542,7 +542,7 @@ textarea{resize:vertical;min-height:70px;line-height:1.5}
       <!-- 소화전 위치 미니 지도 (항상 표시) -->
       <div id="xiMapWrap" style="border-radius:10px;overflow:hidden;border:1.5px solid #A8C8F5;margin-top:8px">
         <div style="background:#1A2742;padding:7px 10px;display:flex;align-items:center;gap:6px">
-          <span style="color:white;font-size:12px;font-weight:700;flex:1"></span>
+          <span style="color:white;font-size:12px;font-weight:700;flex:1">📍 소화전 위치</span>
           <button id="xiMapGpsBtn" onclick="reFetchGpsForXiMap()" title="현위치 갱신"
             style="padding:4px 9px;background:rgba(255,255,255,0.15);color:white;border:none;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;font-family:'Noto Sans KR',sans-serif">
             🎯 현위치
@@ -550,10 +550,6 @@ textarea{resize:vertical;min-height:70px;line-height:1.5}
           <button id="xiMapOpenBtn" onclick="openKakaoMapFromXi()" title="카카오맵에서 열기"
             style="padding:4px 9px;background:#FEE500;color:#3C1E1E;border:none;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;font-family:'Noto Sans KR',sans-serif;display:none">
             🗺 카카오맵
-          </button>
-          <button id="xiMapCaptureBtn" onclick="captureXiMapImage()" title="지도 이미지 캡처 후 사진에 추가"
-            style="padding:4px 9px;background:#7B00A0;color:white;border:none;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;font-family:'Noto Sans KR',sans-serif;display:none">
-            📸 캡처
           </button>
         </div>
         <div id="xiMapContainer" style="width:100%;height:260px;background:#F0EFE9;display:flex;align-items:center;justify-content:center">
@@ -987,15 +983,9 @@ async function doLogin() {
     err.style.display = 'none';
     refreshRegionPrefix();
     // DOMContentLoaded 초기화는 '이미 로그인된 상태'에서만 실행되므로,
-    // 방금 로그인한 경우를 위해 점검일자·목록 렌더링을 여기서도 다시 실행함
+    // 방금 로그인한 경우를 위해 점검일자를 여기서도 오늘 날짜로 채워줌
     const inspDateEl = document.getElementById('inspDate');
     if (inspDateEl && !inspDateEl.value) inspDateEl.value = new Date().toISOString().split('T')[0];
-    renderList();
-    updateCounter();
-    if (state.importedList.length > 0) {
-      updateHydrantSelect();
-      showImportedList(state.importedList, state.importedListSort);
-    }
     showToast(role === 'ADMIN' ? '👑 관리자로 로그인됨' : '✅ 로그인되었습니다', 'success');
   };
 
@@ -1189,40 +1179,6 @@ function switchTab(tab) {
   }
   if (tab === 'form') updateHydrantSelect();
 }
-
-// ── 스와이프로 탭 전환 (점검 목록 ↔ 점검 입력) ──────────
-(function setupSwipeTab() {
-  let startX = 0, startY = 0, startT = 0;
-  const THRESHOLD = 60;   // 최소 스와이프 거리(px)
-  const RESTRAINT = 80;   // 세로 이동 허용치(px) — 이보다 크면 스크롤로 간주
-  const MAX_TIME = 500;   // 최대 스와이프 시간(ms)
-
-  document.addEventListener('touchstart', e => {
-    const t = e.touches[0];
-    startX = t.clientX; startY = t.clientY; startT = Date.now();
-  }, { passive: true });
-
-  document.addEventListener('touchend', e => {
-    if (!sessionStorage.getItem('hyd_auth')) return; // 로그인 화면에서는 무시
-    const t = e.changedTouches[0];
-    const dx = t.clientX - startX;
-    const dy = t.clientY - startY;
-    const dt = Date.now() - startT;
-
-    if (dt > MAX_TIME) return;
-    if (Math.abs(dx) < THRESHOLD) return;
-    if (Math.abs(dy) > RESTRAINT) return;
-
-    // 입력 필드/지도/드롭다운/모달/사진 위에서는 스와이프 무시 (오작동 방지)
-    const el = e.target;
-    if (el.closest('input, textarea, select, #xiMapContainer, #kakaoMapContainer, .modal, .modal-overlay.open, .photo-thumb, .photo-slot')) return;
-
-    // 탭 순서: [점검 목록(왼쪽)] → [점검 입력(오른쪽)]
-    const currentlyList = !document.getElementById('tab-list').classList.contains('hidden');
-    if (dx < 0 && currentlyList) switchTab('form');        // 왼쪽으로 스와이프 → 점검 입력
-    else if (dx > 0 && !currentlyList) switchTab('list');  // 오른쪽으로 스와이프 → 점검 목록
-  }, { passive: true });
-})();
 
 // ── 용수번호 ───────────────────────────────────────────
 function formatHydrantId(input) {
@@ -1762,7 +1718,7 @@ function showCurrentLocationOnXiMap() {
     if (!container) return;
     if (typeof kakao === 'undefined' || !kakao.maps) return;
     container.innerHTML = '';
-    container.style.cssText = 'width:100%;height:260px;max-height:260px;min-height:260px;overflow:hidden;';
+    container.style.cssText = 'width:100%;height:260px;min-height:260px;';
     const center = new kakao.maps.LatLng(lat, lng);
     if (!_xiMap) {
       _xiMap = new kakao.maps.Map(container, { center, level: 4 });
@@ -1790,13 +1746,6 @@ let _xiInfoGps = null;
 // 지도 라벨용 둥근 모서리 말풍선 HTML (카카오 기본 InfoWindow 대신 CustomOverlay에 사용)
 function xiLabelHTML(text, color) {
   return `<div style="padding:5px 10px;font-size:12px;font-weight:700;color:${color};background:white;border:1.5px solid ${color};border-radius:14px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.18)">${text}</div>`;
-}
-
-// 지도 위 소화전 마커 라벨 텍스트 — 선택된 소화전 번호로 표시 (예: 000052 → "🔴 52호")
-function getHydrantMapLabelText() {
-  const id = getHydrantId();
-  const num = parseInt(id, 10);
-  return id && !isNaN(num) ? `🔴 ${num}호` : '🔴 소화전';
 }
 
 // 소화전 선택 시 미니맵 업데이트 (applyExcelInfo에서 호출)
@@ -1846,33 +1795,21 @@ function _initXiMap(fLat, fLng, addr) {
   const container = document.getElementById('xiMapContainer');
 
   // 컨테이너 높이 명시적 보장
-  container.style.cssText = 'width:100%;height:260px;max-height:260px;min-height:260px;overflow:hidden;';
+  container.style.cssText = 'width:100%;height:260px;min-height:260px;';
 
   if (!_xiMap) {
     container.innerHTML = '';
     _xiMap = new kakao.maps.Map(container, { center, level: 4 });
-    _xiMap.addControl(new kakao.maps.ZoomControl(), kakao.maps.ControlPosition.RIGHT);
     kakao.maps.event.addListener(_xiMap, 'click', onXiMapClick);
-    // 네트워크가 느려 타일 로딩이 지연될 때, 실제로 타일이 다 준비된 시점(tilesloaded)에
-    // 맞춰 크기를 다시 잡아줌 — 고정 타이머만으로는 못 따라가는 경우를 보완
-    kakao.maps.event.addListener(_xiMap, 'tilesloaded', () => {
-      const c = document.getElementById('xiMapContainer');
-      if (c) c.style.cssText = 'width:100%;height:260px;max-height:260px;min-height:260px;overflow:hidden;';
-      _xiMap.relayout();
-    });
     _xiMarkerHydrant = new kakao.maps.Marker({ position: center, map: _xiMap, title: '소화전 위치' });
     _xiInfoHydrant = new kakao.maps.CustomOverlay({
       position: center, map: _xiMap, xAnchor: 0.5, yAnchor: 1.8, zIndex: 4,
-      content: xiLabelHTML(getHydrantMapLabelText(), '#C8230A')
+      content: xiLabelHTML('🔴 소화전', '#C8230A')
     });
   } else {
     _xiMap.setCenter(center);
     if (_xiMarkerHydrant) { _xiMarkerHydrant.setPosition(center); _xiMarkerHydrant.setMap(_xiMap); }
-    if (_xiInfoHydrant) {
-      _xiInfoHydrant.setPosition(center);
-      _xiInfoHydrant.setContent(xiLabelHTML(getHydrantMapLabelText(), '#C8230A'));
-      _xiInfoHydrant.setMap(_xiMap);
-    }
+    if (_xiInfoHydrant) { _xiInfoHydrant.setPosition(center); _xiInfoHydrant.setMap(_xiMap); }
     if (_xiMarkerGps) { _xiMarkerGps.setMap(null); _xiMarkerGps = null; }
     if (_xiInfoGps)   { _xiInfoGps.setMap(null);    _xiInfoGps = null; }
     _xiGpsData = null;
@@ -1883,20 +1820,10 @@ function _initXiMap(fLat, fLng, addr) {
   // 카카오맵 열기 버튼 표시
   const openBtn = document.getElementById('xiMapOpenBtn');
   if (openBtn) openBtn.style.display = 'block';
-  const captureBtn = document.getElementById('xiMapCaptureBtn');
-  if (captureBtn) captureBtn.style.display = 'block';
 
-  // relayout 다단계 — 모바일/불안정한 네트워크의 느린 렌더링 대응.
-  // 매번 컨테이너 크기를 다시 강제 지정한 뒤 relayout해서, 네트워크 지연으로
-  // 카카오 SDK가 컨테이너 크기를 잘못 계산해 지도가 화면 전체 크기로 깨지는 것을 방지.
-  const doRelayout = () => {
-    if (!_xiMap) return;
-    const c = document.getElementById('xiMapContainer');
-    if (c) c.style.cssText = 'width:100%;height:260px;max-height:260px;min-height:260px;overflow:hidden;';
-    _xiMap.relayout();
-    _xiMap.setCenter(center);
-  };
-  [100, 300, 600, 1000, 1800, 3000, 5000].forEach(ms => setTimeout(doRelayout, ms));
+  // relayout 다단계 — 모바일 느린 렌더링 대응
+  const doRelayout = () => { if (_xiMap) { _xiMap.relayout(); _xiMap.setCenter(center); } };
+  [100, 300, 600, 1000, 1800].forEach(ms => setTimeout(doRelayout, ms));
 
   // IntersectionObserver — 컨테이너가 화면에 보일 때 추가 relayout
   if ('IntersectionObserver' in window) {
@@ -2103,12 +2030,10 @@ function resetXiMap() {
   _xiMapPendingArgs = null;
   const openBtn = document.getElementById('xiMapOpenBtn');
   if (openBtn) openBtn.style.display = 'none';
-  const captureBtn = document.getElementById('xiMapCaptureBtn');
-  if (captureBtn) captureBtn.style.display = 'none';
   const container = document.getElementById('xiMapContainer');
   if (container) {
     container.innerHTML = '';
-    container.style.cssText = 'width:100%;height:260px;max-height:260px;min-height:260px;overflow:hidden;background:#F0EFE9;display:flex;align-items:center;justify-content:center';
+    container.style.cssText = 'width:100%;height:260px;min-height:260px;background:#F0EFE9;display:flex;align-items:center;justify-content:center';
     container.innerHTML = `<div style="text-align:center;color:var(--gray-3);font-size:13px">
       <div style="font-size:28px;margin-bottom:6px">📍</div>
       소화전을 선택하면<br>위치가 표시됩니다
@@ -2260,58 +2185,6 @@ function updateKakaoInfo() {
   saveBtn.style.background = '#C8230A';
   saveBtn.style.color = 'white';
   saveBtn.style.cursor = 'pointer';
-}
-
-// 미니맵 현재 위치를 정적 지도 이미지로 캡처해 소화전 번호 워터마크와 함께 사진 목록에 추가
-// (카카오맵 SDK 지도는 여러 타일이 합쳐진 형태라 화면을 직접 캡처하면 CORS 문제로 실패하므로,
-//  OpenStreetMap 정적 지도 이미지를 새로 생성하는 방식을 씀 — saveKakaoLocation()과 동일한 방식)
-function captureXiMapImage() {
-  const latStr = document.getElementById('xi-lat')?.textContent;
-  const lngStr = document.getElementById('xi-lng')?.textContent;
-  const lat = parseFloat(latStr), lng = parseFloat(lngStr);
-  if (!lat || !lng || isNaN(lat) || isNaN(lng)) { showToast('위치 정보가 없습니다', 'error'); return; }
-
-  showToast('📸 지도 이미지 캡처 중...', '');
-  const latF = lat.toFixed(6);
-  const lngF = lng.toFixed(6);
-  const tileUrl = `https://staticmap.openstreetmap.de/staticmap.php?center=${latF},${lngF}&zoom=17&size=640x360&markers=${latF},${lngF},red-pushpin`;
-
-  const img = new Image();
-  img.crossOrigin = 'anonymous';
-  img.onload = () => {
-    try {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth || 640;
-      canvas.height = img.naturalHeight || 360;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-      // 소화전 번호 워터마크
-      const id = getHydrantId();
-      if (id) {
-        const label = `No.${id}`;
-        ctx.font = 'bold 20px monospace';
-        const tw = ctx.measureText(label).width;
-        const pad = 8;
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        ctx.fillRect(canvas.width - tw - pad*3, canvas.height - 36, tw + pad*2, 28);
-        ctx.fillStyle = '#FFD700';
-        ctx.fillText(label, canvas.width - tw - pad*2, canvas.height - 13);
-      }
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-      state.photos['photos'].push(dataUrl);
-      renderAllThumbs('photos');
-      showToast('✅ 지도 이미지가 사진 목록에 추가되었습니다', 'success');
-    } catch(e) {
-      Logger.warn('지도 캡처 canvas 실패:', e);
-      state.photos['photos'].push(tileUrl);
-      renderAllThumbs('photos');
-      showToast('✅ 지도 이미지가 사진 목록에 추가되었습니다', 'success');
-    }
-  };
-  img.onerror = () => {
-    showToast('지도 이미지를 불러오지 못했습니다', 'error');
-  };
-  img.src = tileUrl;
 }
 
 function saveKakaoLocation() {
@@ -3455,16 +3328,10 @@ async function importExcel(input) {
 }
 
 
-// 현재 선택된 그룹 필터를 반영한 가져온 소화전 목록 반환 (정렬 버튼 클릭 시 필터 유지용)
-function getGroupFilteredImportedList() {
-  const group = document.getElementById('listGroupFilter')?.value || '';
-  return group ? state.importedList.filter(i => i.group === group) : state.importedList;
-}
-
 // 지상/지하 정렬 버튼 토글 — 누를 때마다 지상식 먼저 ↔ 지하식 먼저 순서를 전환
 function toggleTypeSortImported() {
   const next = state.importedListSort === 'type' ? 'type-desc' : 'type';
-  showImportedList(getGroupFilteredImportedList(), next);
+  showImportedList(state.importedList, next);
 }
 
 function showImportedList(list, sortMode) {
@@ -3497,15 +3364,16 @@ function showImportedList(list, sortMode) {
     <div class="card" style="margin-bottom:12px">
       <div class="card-header">
         <div class="card-num" style="background:#7B00A0">📋</div>
-        <div class="card-title">목록</div>
+        <div class="card-title">가져온 소화전 목록</div>
+        <span class="badge" style="background:#FDE8FF;color:#7B00A0">${sorted.length}개</span>
         <span style="font-size:11px;color:var(--green);font-weight:700;margin-left:4px;background:#EAF5EE;padding:2px 7px;border-radius:20px">✓${doneCount}완료</span>
         <span style="font-size:11px;color:var(--red);font-weight:700;margin-left:3px;background:#FFF0EE;padding:2px 7px;border-radius:20px">●${todoCount}미완료</span>
         <button onclick="document.getElementById('importedListWrap').style.display='none'" style="margin-left:auto;background:none;border:none;color:var(--gray-4);font-size:18px;cursor:pointer;line-height:1">×</button>
       </div>
       <div style="display:flex;gap:6px;padding:8px 14px;border-bottom:var(--border);background:var(--gray-1)">
-        <button onclick="showImportedList(getGroupFilteredImportedList(),'id')"
+        <button onclick="showImportedList(state.importedList,'id')"
           style="padding:5px 12px;border-radius:20px;border:var(--border);font-family:'Noto Sans KR',sans-serif;font-size:12px;font-weight:700;cursor:pointer;${sortMode==='id'?'background:var(--dark);color:white;border-color:var(--dark)':'background:white;color:var(--gray-4)'}">번호순</button>
-        <button onclick="showImportedList(getGroupFilteredImportedList(),'addr')"
+        <button onclick="showImportedList(state.importedList,'addr')"
           style="padding:5px 12px;border-radius:20px;border:var(--border);font-family:'Noto Sans KR',sans-serif;font-size:12px;font-weight:700;cursor:pointer;${sortMode==='addr'?'background:var(--dark);color:white;border-color:var(--dark)':'background:white;color:var(--gray-4)'}">주소순</button>
         <button onclick="toggleTypeSortImported()"
           style="padding:5px 12px;border-radius:20px;border:var(--border);font-family:'Noto Sans KR',sans-serif;font-size:12px;font-weight:700;cursor:pointer;${(sortMode==='type'||sortMode==='type-desc')?'background:var(--dark);color:white;border-color:var(--dark)':'background:white;color:var(--gray-4)'}">${sortMode==='type-desc'?'지하/지상':'지상/지하'}</button>
