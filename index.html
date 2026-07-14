@@ -572,7 +572,7 @@ input:focus,textarea:focus,select:focus{border-color:var(--ac)}
 <script src="https://rcntiger.github.io/common/excel.js"></script>
 <script>
 // ━━ 상수 ━━
-const APP_VERSION = 'v1.1.1'; // 버전 규칙: 주(DB 변경/호환 깨짐).부(기능 추가).수(버그 수정) — 배포 시 CHANGELOG.md도 함께 갱신
+const APP_VERSION = 'v1.1.2'; // 버전 규칙: 주(DB 변경/호환 깨짐).부(기능 추가).수(버그 수정) — 배포 시 CHANGELOG.md도 함께 갱신
 const SB_URL  = 'https://uxbbzvvkpebdvdjobnyz.supabase.co'; // 소화전 점검 DB (119hyd-inspec와 동일 프로젝트, 별도 hydmap_ 테이블 사용)
 const SB_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV4YmJ6dnZrcGViZHZkam9ibnl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwMTIzNTQsImV4cCI6MjA4OTU4ODM1NH0.PvCMpxSv-B3woWKfjxEkoyv1gDdjEHZy3_lvWVrSz2E';
 const JS_KEY  = 'a5e543d870953c97c0775ff90846c81b';
@@ -1093,9 +1093,15 @@ async function loadProjectData(){
     // 그룹 목록
     groups=[...new Set(items.map(d=>String(d.group_name||'').trim()).filter(Boolean))]
       .sort((a,b)=>a.localeCompare(b,'ko',{numeric:true,sensitivity:'base'}));
+    // 색상표를 정렬된 그룹 순서로 선등록 → 매번 같은 조가 같은 색을 갖고, 팀 내(연속 순번) 조끼리는 색이 겹치지 않음
+    resetGroupColors();
+    groups.forEach(g=>groupColor({group_name:g}));
     buildGroupFilter();
     renderAllMarkers();
     renderList();
+    // 세분계획(팀/조 잠금)으로 진입한 경우 등 초기 필터 상태를 마커/목록에 즉시 반영
+    // (예전엔 필터를 한 번 조작해야 숨김이 적용되어, 팀 카드로 들어가도 처음엔 전체가 보이던 버그)
+    applyFilter();
     updateStats();
     if(items.length)fitAll();
   }catch(e){showToast('데이터 로드 실패','err');}
@@ -1305,6 +1311,7 @@ function showDiag(code){
 
 /* ══════════ Marker & List Render ══════════ */
 const _groupColorMap={};
+function resetGroupColors(){for(const k in _groupColorMap)delete _groupColorMap[k];}
 function groupColor(d){
   if(!d.group_name)return GROUP_COLORS[0];
   if(!_groupColorMap[d.group_name]){
@@ -1313,7 +1320,15 @@ function groupColor(d){
   }
   return _groupColorMap[d.group_name];
 }
-function groupCls(d){return 'g'+(Object.keys(_groupColorMap).indexOf(d.group_name||'')+1);}
+// CSS 클래스는 g1~g6(+g0 회색)까지만 존재하므로 그룹이 6개를 넘으면 색을 순환시킨다.
+// (예전엔 indexOf+1을 그대로 써서 7번째 그룹부터 존재하지 않는 g7, g8...이 되어 전부 기본 빨강으로 표시되던 버그)
+function groupCls(d){
+  const g=String(d.group_name||'').trim();
+  if(!g)return 'g0';
+  groupColor(d); // 색상표 등록 보장
+  const idx=Object.keys(_groupColorMap).indexOf(g);
+  return 'g'+((idx%GROUP_COLORS.length)+1);
+}
 
 // 정보카드(위로 길게 펼쳐짐)를 열 때, 마커를 화면 정중앙이 아니라
 // 화면 중앙보다 아래쪽으로 이동시켜서 카드가 위쪽으로 펼쳐질 공간을 확보한다.
