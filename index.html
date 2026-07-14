@@ -853,7 +853,7 @@ function renderProjects(list){
       <div class="project-card-name">📋 ${esc(p.name)}</div>
       <div class="project-card-desc">${esc(p.description||'')}</div>
       <div class="project-card-meta">${cardMetaHtml(p)}</div>
-      ${children.length?`<button class="tree-expand-btn" id="tt-${p.id}" data-count="${children.length}" data-kind="plan" onclick="event.stopPropagation();toggleTree('${p.id}',false)">${pOpen?'▲ 세분계획 접기':`▼ 세분계획 ${children.length}개 펼치기`}</button>`:''}
+      ${children.length?`<button class="tree-expand-btn" id="tt-${p.id}" data-count="${children.length}" data-kind="plan" onclick="event.stopPropagation();toggleTree('${p.id}',false)">${pOpen?'▲ 팀/조별 담당 접기':'▼ 팀/조별 담당 펼쳐 보기'}</button>`:''}
       <button class="subplan-btn" onclick="event.stopPropagation();generateSubPlans('${p.id}')" title="엑셀의 팀/조 값 기준으로 조별 세분계획을 생성하거나 갱신합니다">🗂 조별 세분계획 ${children.length?'갱신':'생성'}</button>`;
     card.onclick=()=>openProject(p);
     frag.appendChild(card);
@@ -910,7 +910,7 @@ function toggleTree(id,def){
     if(t.dataset.kind==='team'){
       t.textContent=_treeOpen[id]?'▲ 조 목록 접기':`▼ ${n}개 조 펼치기`;
     }else{
-      t.textContent=_treeOpen[id]?'▲ 세분계획 접기':`▼ 세분계획 ${n}개 펼치기`;
+      t.textContent=_treeOpen[id]?'▲ 팀/조별 담당 접기':'▼ 팀/조별 담당 펼쳐 보기';
     }
   }
 }
