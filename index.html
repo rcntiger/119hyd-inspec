@@ -50,7 +50,17 @@ input:focus,textarea:focus,select:focus{border-color:var(--ac)}
 .home-content{flex:1;padding:20px;max-width:760px;margin:0 auto;width:100%}
 .section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
 .section-title{font-size:13px;font-weight:700;color:var(--mt);text-transform:uppercase;letter-spacing:.08em}
-.project-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+.project-grid{display:flex;flex-direction:column;gap:10px}
+/* 트리 하위 묶음: 왼쪽 가이드선 + 들여쓰기. 접기/펼치기는 display 토글로 처리 */
+.tree-children{display:flex;flex-direction:column;gap:8px;margin-left:14px;padding-left:12px;border-left:2px solid rgba(255,255,255,.09)}
+.tree-toggle{background:transparent;border:none;color:var(--mt);cursor:pointer;font-size:13px;padding:0 6px 0 0;line-height:1;vertical-align:middle}
+.tree-toggle:hover{color:var(--ac)}
+.tree-count{font-size:10.5px;color:var(--mt);font-weight:400;margin-left:6px}
+/* 눈에 띄는 펼침/접기 버튼: 세분계획이 있다는 것을 명확히 보여준다 */
+.tree-expand-btn{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin-top:8px;padding:7px 10px;border:1px solid rgba(47,129,247,.35);border-radius:6px;background:rgba(47,129,247,.12);color:var(--ac);font-size:12px;font-weight:700;cursor:pointer;transition:background .15s}
+.tree-expand-btn:hover{background:rgba(47,129,247,.25)}
+.project-card.subplan.team .tree-expand-btn{border-color:rgba(63,185,80,.35);background:rgba(63,185,80,.12);color:var(--lo)}
+.project-card.subplan.team .tree-expand-btn:hover{background:rgba(63,185,80,.25)}
 .project-card{background:var(--sur);border:1px solid var(--bd2);border-radius:var(--r2);padding:16px;cursor:pointer;transition:all .15s;position:relative}
 .project-card-updown{position:absolute;right:8px;bottom:8px;display:flex;gap:4px}
 .project-card-updown button{width:26px;height:22px;border:1px solid var(--bd2);border-radius:5px;background:var(--sur2);color:var(--mt);font-size:11px;cursor:pointer}
@@ -67,9 +77,9 @@ input:focus,textarea:focus,select:focus{border-color:var(--ac)}
 .project-card:hover .project-card-edit{opacity:1}
 .project-card-edit:hover{background:rgba(47,129,247,.15);color:var(--ac)}
 /* 세분계획(조별 뷰) 카드: 부모 카드 아래에 들여쓰기된 작은 카드로 표시 */
-.project-card.subplan{margin-left:18px;padding:10px 14px;border-left:3px solid var(--ac);background:rgba(47,129,247,.04)}
+.project-card.subplan{margin-left:0;padding:10px 14px;border-left:3px solid var(--ac);background:rgba(47,129,247,.04)}
 .project-card.subplan.team{border-left-color:var(--lo);background:rgba(63,185,80,.05)}
-.project-card.subplan.nested{margin-left:36px}
+.project-card.subplan.nested{margin-left:0}
 .project-card.subplan .project-card-name{font-size:13px}
 .subplan-btn{display:inline-flex;align-items:center;gap:4px;margin-top:8px;padding:4px 10px;border:1px dashed var(--bd2);border-radius:6px;background:transparent;color:var(--mt);font-size:11px;font-weight:600;cursor:pointer;transition:all .15s}
 .subplan-btn:hover{border-color:var(--ac);color:var(--ac)}
@@ -572,7 +582,7 @@ input:focus,textarea:focus,select:focus{border-color:var(--ac)}
 <script src="https://rcntiger.github.io/common/excel.js"></script>
 <script>
 // ━━ 상수 ━━
-const APP_VERSION = 'v1.1.2'; // 버전 규칙: 주(DB 변경/호환 깨짐).부(기능 추가).수(버그 수정) — 배포 시 CHANGELOG.md도 함께 갱신
+const APP_VERSION = 'v1.2.1'; // 버전 규칙: 주(DB 변경/호환 깨짐).부(기능 추가).수(버그 수정) — 배포 시 CHANGELOG.md도 함께 갱신
 const SB_URL  = 'https://uxbbzvvkpebdvdjobnyz.supabase.co'; // 소화전 점검 DB (119hyd-inspec와 동일 프로젝트, 별도 hydmap_ 테이블 사용)
 const SB_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV4YmJ6dnZrcGViZHZkam9ibnl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwMTIzNTQsImV4cCI6MjA4OTU4ODM1NH0.PvCMpxSv-B3woWKfjxEkoyv1gDdjEHZy3_lvWVrSz2E';
 const JS_KEY  = 'a5e543d870953c97c0775ff90846c81b';
@@ -822,12 +832,17 @@ function renderProjects(list){
     return;
   }
   if(empty)empty.style.display='none';
+  // ── 트리 접기/펼치기 상태 (localStorage에 기억) ──
   const frag=document.createDocumentFragment();
   list.forEach((p,i)=>{
+    const children=subPlanList.filter(sp=>String(sp.parent_id)===String(p.id));
+    const isTeamCard=sp=>children.some(o=>o.id!==sp.id&&String(o.filter_group||'').startsWith(String(sp.filter_group||'')+' '));
+    const hasTeamParent=sp=>children.some(o=>o.id!==sp.id&&String(sp.filter_group||'').startsWith(String(o.filter_group||'')+' '));
     const card=document.createElement('div');
     card.className='project-card';
     card.id='pcard-'+p.id;
     card.dataset.id=p.id;
+    const pOpen=_treeIsOpen(p.id,false);
     card.innerHTML=`
       <div class="project-card-updown">
         <button onclick="event.stopPropagation();moveProject('${p.id}',-1)" title="위로" ${i===0?'disabled':''}>▲</button>
@@ -835,32 +850,69 @@ function renderProjects(list){
       </div>
       <button class="project-card-del" onclick="event.stopPropagation();deleteProject('${p.id}','${esc(p.name)}')" title="삭제">✕</button>
       <button class="project-card-edit" onclick="event.stopPropagation();showEditModal('${p.id}')" title="수정">✏️</button>
-      <div class="project-card-name">${esc(p.name)}</div>
+      <div class="project-card-name">📋 ${esc(p.name)}</div>
       <div class="project-card-desc">${esc(p.description||'')}</div>
       <div class="project-card-meta">${cardMetaHtml(p)}</div>
-      <button class="subplan-btn" onclick="event.stopPropagation();generateSubPlans('${p.id}')" title="엑셀의 팀/조 값 기준으로 조별 세분계획을 생성하거나 갱신합니다">🗂 조별 세분계획 생성/갱신</button>`;
+      ${children.length?`<button class="tree-expand-btn" id="tt-${p.id}" data-count="${children.length}" data-kind="plan" onclick="event.stopPropagation();toggleTree('${p.id}',false)">${pOpen?'▲ 세분계획 접기':`▼ 세분계획 ${children.length}개 펼치기`}</button>`:''}
+      <button class="subplan-btn" onclick="event.stopPropagation();generateSubPlans('${p.id}')" title="엑셀의 팀/조 값 기준으로 조별 세분계획을 생성하거나 갱신합니다">🗂 조별 세분계획 ${children.length?'갱신':'생성'}</button>`;
     card.onclick=()=>openProject(p);
     frag.appendChild(card);
-    // 이 부모에 딸린 세분계획 카드들을 바로 아래에 표시
-    // 팀 카드(다른 세분계획들의 접두어가 되는 것)는 🏢, 그 소속 조는 한 단계 더 들여쓴 👥 카드로
-    const children=subPlanList.filter(sp=>String(sp.parent_id)===String(p.id));
-    const isTeamCard=sp=>children.some(o=>o.id!==sp.id&&String(o.filter_group||'').startsWith(String(sp.filter_group||'')+' '));
-    const hasTeamParent=sp=>children.some(o=>o.id!==sp.id&&String(sp.filter_group||'').startsWith(String(o.filter_group||'')+' '));
-    children.forEach(sp=>{
-      const team=isTeamCard(sp),nested=hasTeamParent(sp);
-      const sc=document.createElement('div');
-      sc.className='project-card subplan'+(team?' team':'')+(nested?' nested':'');
-      sc.id='pcard-'+sp.id;
-      sc.dataset.id=sp.id;
-      sc.innerHTML=`
-        <button class="project-card-del" onclick="event.stopPropagation();deleteProject('${sp.id}','${esc(sp.name)}')" title="삭제">✕</button>
-        <div class="project-card-name">${team?'🏢':'👥'} ${esc(sp.name)}</div>
-        <div class="project-card-meta">${cardMetaHtml(sp)}</div>`;
-      sc.onclick=()=>openProject(sp);
-      frag.appendChild(sc);
+    if(!children.length)return;
+    // ── 하위 트리: 팀 노드 → 그 아래 소속 조 노드, 팀 없는 조는 부모 바로 아래 ──
+    const wrap=document.createElement('div');
+    wrap.className='tree-children';wrap.id='tw-'+p.id;
+    wrap.style.display=pOpen?'flex':'none';
+    const teams=children.filter(isTeamCard);
+    const under=t=>children.filter(sp=>sp.id!==t.id&&String(sp.filter_group||'').startsWith(String(t.filter_group||'')+' '));
+    teams.forEach(t=>{
+      const jos=under(t);
+      wrap.appendChild(_subPlanCard(t,true,jos.length));
+      if(jos.length){
+        const tw=document.createElement('div');
+        tw.className='tree-children';tw.id='tw-'+t.id;
+        tw.style.display=_treeIsOpen(t.id,true)?'flex':'none';
+        jos.forEach(j=>tw.appendChild(_subPlanCard(j,false,0)));
+        wrap.appendChild(tw);
+      }
     });
+    children.filter(sp=>!isTeamCard(sp)&&!hasTeamParent(sp)).forEach(j=>wrap.appendChild(_subPlanCard(j,false,0)));
+    frag.appendChild(wrap);
   });
   grid.appendChild(frag);
+}
+// 세분계획(팀/조) 카드 한 장 생성
+function _subPlanCard(sp,isTeam,childCount){
+  const sc=document.createElement('div');
+  sc.className='project-card subplan'+(isTeam?' team':'');
+  sc.id='pcard-'+sp.id;
+  sc.dataset.id=sp.id;
+  const open=_treeIsOpen(sp.id,true);
+  sc.innerHTML=`
+    <button class="project-card-del" onclick="event.stopPropagation();deleteProject('${sp.id}','${esc(sp.name)}')" title="삭제">✕</button>
+    <div class="project-card-name">${isTeam?'🏢':'👥'} ${esc(sp.name)}</div>
+    <div class="project-card-meta">${cardMetaHtml(sp)}</div>
+    ${isTeam&&childCount?`<button class="tree-expand-btn" id="tt-${sp.id}" data-count="${childCount}" data-kind="team" onclick="event.stopPropagation();toggleTree('${sp.id}',true)">${open?'▲ 조 목록 접기':`▼ ${childCount}개 조 펼치기`}</button>`:''}`;
+  sc.onclick=()=>openProject(sp);
+  return sc;
+}
+// ── 트리 접기/펼치기 ──
+let _treeOpen={};
+try{_treeOpen=JSON.parse(safeStorage.get('hy_tree_open','{}'))||{};}catch(e){_treeOpen={};}
+function _treeIsOpen(id,def){return (id in _treeOpen)?!!_treeOpen[id]:def;}
+function toggleTree(id,def){
+  _treeOpen[id]=!_treeIsOpen(id,def);
+  safeStorage.set('hy_tree_open',JSON.stringify(_treeOpen));
+  const w=document.getElementById('tw-'+id);
+  const t=document.getElementById('tt-'+id);
+  if(w)w.style.display=_treeOpen[id]?'flex':'none';
+  if(t){
+    const n=t.dataset.count||'';
+    if(t.dataset.kind==='team'){
+      t.textContent=_treeOpen[id]?'▲ 조 목록 접기':`▼ ${n}개 조 펼치기`;
+    }else{
+      t.textContent=_treeOpen[id]?'▲ 세분계획 접기':`▼ 세분계획 ${n}개 펼치기`;
+    }
+  }
 }
 // 드래그가 잘 안 될 때를 위한 대안: 버튼으로 한 칸씩 순서 이동
 async function moveProject(id,dir){
